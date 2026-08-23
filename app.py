@@ -13,19 +13,4 @@ submit_btn = st.button("Analyze & Route Ticket", use_container_width=True)
 
 st.write("---")
 
-# 2. AI Outputs Structural Framework
-st.subheader("🧠 AI Triage Outputs")
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("### 📊 ML Classification")
-    st.info("Issue Type: [Pending]\n\nUrgency Level: [Pending]")
-    
-with col2:
-    st.markdown("### 📝 Generative AI")
-    st.info("Summary: [Pending]\n\nSuggested Response: [Pending]")
-    
-with col3:
-    st.markdown("### 🤖 AI Agent Route")
-    st.info("Assigned Department: [Pending]\n\nNext Best Action: [Pending]")
