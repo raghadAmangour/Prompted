@@ -38,64 +38,73 @@ if user_role == "Customer":
         else:
             st.warning("Please fill in both your name and complaint details.")
 
-# 💼 3. واجهة الموظف والذكاء الاصطناعي (أصبحت متصلة بالعميل 100%)
+# 💼 3. واجهة الموظف والذكاء الاصطناعي (الحذف والتحديث التلقائي)
 elif user_role == "Support Employee":
     st.subheader("💼 Internal Support Dashboard & AI Triage")
     
-    st.write("### 📋 Incoming Tickets Queue")
-    # عرض الجدول مباشرة من الذاكرة المشتركة
-    df = pd.DataFrame(st.session_state.tickets)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    st.write("---")
-    
-    st.write("### 🔍 Select a Ticket to Review AI Triage")
-    selected_id = st.selectbox("Choose Ticket ID to process:", df["Ticket ID"])
-    
-    # جلب تفاصيل الشكوى المختارة
-    selected_ticket = df[df["Ticket ID"] == selected_id].iloc[0]
-    st.text_area("Original Customer Complaint:", value=selected_ticket["Complaint"], disabled=True, height=70)
-    
-    st.write("#### 🧠 AI Automated Analysis Results")
-    
-    # تحليل ديناميكي ذكي: إذا كانت التذكرة جديدة كتبها المستخدم، نقوم بعمل تحليل افتراضي لها
-    if "credit" in selected_ticket["Complaint"].lower() or "charge" in selected_ticket["Complaint"].lower() or "money" in selected_ticket["Complaint"].lower():
-        ml_cat, ml_urg = "💳 Billing & Payments", "🔴 High"
-        gen_sum = "Customer is reporting a financial or transaction issue."
-        gen_draft = f"Dear {selected_ticket['Customer']}, we are reviewing your billing transaction now."
-        agent_dept, agent_act = "🏦 Finance Department", "Verify payment gateway logs."
-    elif "crash" in selected_ticket["Complaint"].lower() or "app" in selected_ticket["Complaint"].lower() or "error" in selected_ticket["Complaint"].lower():
-        ml_cat, ml_urg = "📱 Technical / Bug", "🟡 Medium"
-        gen_sum = "Customer is experiencing a technical glitch or application crash."
-        gen_draft = f"Dear {selected_ticket['Customer']}, our technical support is investigating the application error."
-        agent_dept, agent_act = "💻 IT & Development Team", "Check system bug logs."
+    # تحقق إذا كانت جميع التذاكر قد حُلت واختفت
+    if len(st.session_state.tickets) == 0:
+        st.balloons()
+        st.success("🎉 All tickets have been resolved! Great job team!")
     else:
-        # تحليل عام لأي نص آخر يكتبه المدرب للاختبار
-        ml_cat, ml_urg = "📂 General Inquiry", "🟢 Low"
-        gen_sum = "General customer support request."
-        gen_draft = f"Dear {selected_ticket['Customer']}, thank you for contacting us. We will reply shortly."
-        agent_dept, agent_act = "👥 Customer Service Team", "Assign to general support agent."
+        st.write("### 📋 Incoming Tickets Queue")
+        df = pd.DataFrame(st.session_state.tickets)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        st.write("---")
+        
+        st.write("### 🔍 Select a Ticket to Review AI Triage")
+        selected_id = st.selectbox("Choose Ticket ID to process:", df["Ticket ID"])
+        
+        # جلب تفاصيل الشكوى المختارة
+        selected_ticket = df[df["Ticket ID"] == selected_id].iloc[0]
+        st.text_area("Original Customer Complaint:", value=selected_ticket["Complaint"], disabled=True, height=70)
+        
+        st.write("#### 🧠 AI Automated Analysis Results")
+        
+        # تحليل ديناميكي ذكي بناءً على نص الشكوى المختارة
+        if "credit" in selected_ticket["Complaint"].lower() or "charge" in selected_ticket["Complaint"].lower() or "money" in selected_ticket["Complaint"].lower():
+            ml_cat, ml_urg = "💳 Billing & Payments", "🔴 High"
+            gen_sum = "Customer is reporting a financial or transaction issue."
+            gen_draft = f"Dear {selected_ticket['Customer']}, we are reviewing your billing transaction now."
+            agent_dept, agent_act = "🏦 Finance Department", "Verify payment gateway logs."
+        elif "crash" in selected_ticket["Complaint"].lower() or "app" in selected_ticket["Complaint"].lower() or "error" in selected_ticket["Complaint"].lower():
+            ml_cat, ml_urg = "📱 Technical / Bug", "🟡 Medium"
+            gen_sum = "Customer is experiencing a technical glitch or application crash."
+            gen_draft = f"Dear {selected_ticket['Customer']}, our technical support is investigating the application error."
+            agent_dept, agent_act = "💻 IT & Development Team", "Check system bug logs."
+        else:
+            ml_cat, ml_urg = "📂 General Inquiry", "🟢 Low"
+            gen_sum = "General customer support request."
+            gen_draft = f"Dear {selected_ticket['Customer']}, thank you for contacting us. We will reply shortly."
+            agent_dept, agent_act = "👥 Customer Service Team", "Assign to general support agent."
 
-    # عرض البيانات في الأعمدة الثلاثة
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("##### 📊 ML Classification")
-        st.info(f"**Category:** {ml_cat}\n\n**Urgency:** {ml_urg}")
-    with col2:
-        st.markdown("##### 📝 Generative AI")
-        st.info(f"**Summary:** {gen_sum}\n\n**Draft:** {gen_draft}")
-    with col3:
-        st.markdown("##### 🤖 AI Agent Route")
-        st.info(f"**Target:** {agent_dept}\n\n**Action:** {agent_act}")
+        # عرض البيانات في الأعمدة الثلاثة
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("##### 📊 ML Classification")
+            st.info(f"**Category:** {ml_cat}\n\n**Urgency:** {ml_urg}")
+        with col2:
+            st.markdown("##### 📝 Generative AI")
+            st.info(f"**Summary:** {gen_sum}\n\n**Draft:** {gen_draft}")
+        with col3:
+            st.markdown("##### 🤖 AI Agent Route")
+            st.info(f"**Target:** {agent_dept}\n\n**Action:** {agent_act}")
 
-    st.write("---")
-    st.write("### 🛠️ Resolution Action")
-    
-    action_col1, action_col2 = st.columns(2)
-    with action_col1:
-        if st.button("🚀 Approve AI Triage & Route Ticket", use_container_width=True):
-            st.success(f"Ticket {selected_id} successfully routed to {agent_dept}!")
-    with action_col2:
-        if st.button("✅ Resolve & Close Ticket Immediately", use_container_width=True):
-            st.balloons()
-            st.success(f"Excellent! Ticket {selected_id} is now CLOSED and resolved.")
+        st.write("---")
+        st.write("### 🛠️ Resolution Action")
+        
+        action_col1, action_col2 = st.columns(2)
+        with action_col1:
+            if st.button("🚀 Approve AI Triage & Route Ticket", use_container_width=True):
+                # كود الحذف اللحظي والتوجيه عند الضغط
+                st.session_state.tickets = [t for t in st.session_state.tickets if t["Ticket ID"] != selected_id]
+                st.success(f"Ticket {selected_id} successfully routed to {agent_dept}!")
+                st.rerun() # إعادة إنعاش الصفحة لمشاهدة التحديث فوراً
+                
+        with action_col2:
+            if st.button("✅ Resolve & Close Ticket Immediately", use_container_width=True):
+                # كود الحذف اللحظي والحل عند الضغط
+                st.session_state.tickets = [t for t in st.session_state.tickets if t["Ticket ID"] != selected_id]
+                st.success(f"Excellent! Ticket {selected_id} is now CLOSED and resolved.")
+                st.rerun() # إعادة إنعاش الصفحة لمشاهدة التحديث فوراً
