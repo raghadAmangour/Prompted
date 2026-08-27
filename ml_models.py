@@ -28,7 +28,7 @@ from sklearn.metrics import (
 # 1. CONFIGURATION
 # ==============================================================================
 
-FILE_PATH = "cleaned_support_tickets.csv"
+FILE_PATH = "ml_ready_support_tickets.csv"
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.20
