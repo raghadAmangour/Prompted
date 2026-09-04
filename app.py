@@ -410,6 +410,11 @@ def run_agentic_pipeline(subject, body, log_callback=None):
 
 st.set_page_config(page_title="AI Support Ticket Triage", page_icon="🎫", layout="centered")
 
+# Developer/debug mode: OFF by default for every normal customer visit.
+# To inspect the raw JSON while testing, open the app with ?debug=1 added
+# to the URL, e.g. http://localhost:8501/?debug=1
+DEBUG_MODE = st.query_params.get("debug") == "1"
+
 st.title("🎫 AI Support Ticket Triage")
 st.caption("ML classification + an agentic GenAI layer (tool calling) running on Groq's cloud Llama.")
 
@@ -466,5 +471,6 @@ if submitted:
         st.subheader("Suggested Customer Response")
         st.write(result["suggested_response"])
 
-        with st.expander("Full JSON result"):
-            st.json(result)
+        if DEBUG_MODE:
+            with st.expander("Full JSON result"):
+                st.json(result)
