@@ -24,7 +24,10 @@ from groq import Groq
 ISSUE_TYPE_MODEL_PATH = "models/issue_type_model.joblib"
 PRIORITY_MODEL_PATH = "models/priority_model.joblib"
 
-LLAMA_MODEL = "llama-3.1-8b-instant"   # or "llama-3.3-70b-versatile" for higher quality
+LLAMA_MODEL = "openai/gpt-oss-20b"   # or "openai/gpt-oss-120b" for higher quality
+# NOTE: llama-3.1-8b-instant and llama-3.3-70b-versatile were deprecated/shut down
+# by Groq on 2026-08-16. Use the openai/gpt-oss-* models instead (or check
+# https://console.groq.com/docs/models for the current list).
 TEMPERATURE = 0.2
 MAX_AGENT_STEPS = 6
 
