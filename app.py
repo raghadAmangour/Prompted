@@ -426,14 +426,16 @@ if submitted:
     if not subject.strip() and not body.strip():
         st.warning("Please enter a subject or body.")
     else:
-        log_box = st.empty()
-        logs = []
+        # Internal agent steps (tool calls, retries, etc.) are intentionally
+        # NOT shown to the customer. They're only useful for debugging, so we
+        # collect them silently here. If you ever need to inspect them, print
+        # `debug_logs` to your terminal/console.
+        debug_logs = []
 
         def log_callback(msg):
-            logs.append(msg)
-            log_box.info("\n\n".join(logs))
+            debug_logs.append(msg)
 
-        with st.spinner("Running ML models + agentic reasoning..."):
+        with st.spinner("Analyzing your ticket..."):
             try:
                 result = run_agentic_pipeline(subject, body, log_callback=log_callback)
             except Exception as e:
