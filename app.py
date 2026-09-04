@@ -1,131 +1,465 @@
-import streamlit as st
+"""
+AI Support Ticket Triage — Streamlit App
+ML (Issue Type + Priority) + Agentic GenAI layer (Groq-hosted Llama, tool calling)
+
+Deploy notes:
+- Put issue_type_model.joblib and priority_model.joblib inside the models/ folder
+  next to this file (NOT an external path like ../Downloads/...).
+- Set GROQ_API_KEY in Streamlit Cloud's "Secrets" panel (or a local .streamlit/secrets.toml):
+    GROQ_API_KEY = "gsk_..."
+"""
+
+import json
+import re
+
+import joblib
 import pandas as pd
+import streamlit as st
+from groq import Groq
 
-# Page Configuration
-st.set_page_config(page_title="Prompted", page_icon="🤖", layout="wide")
+# ---------------------------------------------------------------------------
+# 1. CONFIGURATION
+# ---------------------------------------------------------------------------
 
-# Application Header
-st.title("🤖 Prompted: AI Support Ticket Triage Agent")
-st.write("---")
+ISSUE_TYPE_MODEL_PATH = "models/issue_type_model.joblib"
+PRIORITY_MODEL_PATH = "models/priority_model.joblib"
 
-# 1. SESSION STATE INITIALIZATION
-# Creates a temporary simulated database to store tickets during the app runtime
-if "tickets" not in st.session_state:
-    st.session_state.tickets = [
-        {"Ticket ID": "T-101", "Customer": "Sarah Ahmed", "Complaint": "My credit card was charged twice for the same subscription.", "Status": "New"},
-        {"Ticket ID": "T-102", "Customer": "John Doe", "Complaint": "The mobile application crashes every time I try to upload my profile picture.", "Status": "New"},
+LLAMA_MODEL = "llama-3.1-8b-instant"   # or "llama-3.3-70b-versatile" for higher quality
+TEMPERATURE = 0.2
+MAX_AGENT_STEPS = 6
+
+ALLOWED_QUEUES = [
+    "Billing and Payments",
+    "Returns and Exchanges",
+    "Technical Support",
+    "Account Management",
+    "General Inquiry",
+]
+
+REQUIRED_GENAI_FIELDS = [
+    "predicted_queue",
+    "summary",
+    "main_problem",
+    "recommended_action",
+    "suggested_response",
+]
+
+# ---------------------------------------------------------------------------
+# 2. CLIENT + MODELS (cached so they load once per session)
+# ---------------------------------------------------------------------------
+
+
+@st.cache_resource
+def get_groq_client():
+    api_key = st.secrets.get("GROQ_API_KEY")
+    if not api_key:
+        st.error(
+            "GROQ_API_KEY is missing. Add it under Settings → Secrets "
+            "in Streamlit Cloud (or .streamlit/secrets.toml locally)."
+        )
+        st.stop()
+    return Groq(api_key=api_key)
+
+
+@st.cache_resource
+def load_ml_models():
+    try:
+        issue_type_model = joblib.load(ISSUE_TYPE_MODEL_PATH)
+        priority_model = joblib.load(PRIORITY_MODEL_PATH)
+        return issue_type_model, priority_model
+    except FileNotFoundError as e:
+        st.error(
+            f"Could not find ML model files: {e}. "
+            f"Make sure issue_type_model.joblib and priority_model.joblib "
+            f"are inside the models/ folder in the repo."
+        )
+        st.stop()
+
+
+client = get_groq_client()
+issue_type_model, priority_model = load_ml_models()
+
+# ---------------------------------------------------------------------------
+# 3. ML PREDICTIONS
+# ---------------------------------------------------------------------------
+
+
+def predict_ticket_labels(subject, body):
+    subject = "" if pd.isna(subject) else str(subject).strip()
+    body = "" if pd.isna(body) else str(body).strip()
+    ticket_text = f"{subject} {body}".strip()
+
+    if not ticket_text:
+        raise ValueError("Ticket text cannot be empty.")
+
+    predicted_type = str(issue_type_model.predict([ticket_text])[0])
+    predicted_priority = str(priority_model.predict([ticket_text])[0])
+
+    return {
+        "ticket_text": ticket_text,
+        "predicted_type": predicted_type,
+        "predicted_priority": predicted_priority,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. AGENT TOOLS (operate only on ticket text + our own ML models)
+# ---------------------------------------------------------------------------
+
+
+def get_ml_confidence(subject: str, body: str) -> dict:
+    ticket_text = f"{subject} {body}".strip()
+    result = {}
+    for name, model in [("issue_type", issue_type_model), ("priority", priority_model)]:
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba([ticket_text])[0]
+            classes = model.classes_
+            best_idx = probs.argmax()
+            result[name] = {
+                "predicted_label": str(classes[best_idx]),
+                "confidence": round(float(probs[best_idx]), 3),
+            }
+        else:
+            result[name] = {
+                "predicted_label": str(model.predict([ticket_text])[0]),
+                "confidence": None,
+            }
+    return result
+
+
+URGENCY_KEYWORDS = [
+    "urgent", "asap", "immediately", "critical", "emergency",
+    "down", "outage", "security breach", "unauthorized",
+    "can't access", "cannot access", "data loss", "broken",
+]
+
+
+def analyze_urgency_signals(subject: str, body: str) -> dict:
+    text = f"{subject} {body}".lower()
+    matched = [kw for kw in URGENCY_KEYWORDS if kw in text]
+    return {"urgency_score": len(matched), "matched_keywords": matched}
+
+
+def extract_ticket_entities(subject: str, body: str) -> dict:
+    text = f"{subject} {body}"
+    reference_numbers = re.findall(r"\b(?:INV|ORD|REF)?-?\d{4,}\b", text)
+    emails = re.findall(r"[\w\.-]+@[\w\.-]+\.\w+", text)
+    dates = re.findall(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", text)
+    return {"reference_numbers": reference_numbers, "emails": emails, "dates": dates}
+
+
+def decide_escalation(priority: str, urgency_score: int, ml_confidence: float) -> dict:
+    should_escalate = priority.lower() == "high" and (
+        urgency_score >= 2 or (ml_confidence is not None and ml_confidence < 0.5)
+    )
+    reason = (
+        "High priority combined with strong urgency signals or low ML confidence."
+        if should_escalate
+        else "No strong combined signal for escalation."
+    )
+    return {"should_escalate": should_escalate, "reason": reason}
+
+
+TOOL_REGISTRY = {
+    "get_ml_confidence": get_ml_confidence,
+    "analyze_urgency_signals": analyze_urgency_signals,
+    "extract_ticket_entities": extract_ticket_entities,
+    "decide_escalation": decide_escalation,
+}
+
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ml_confidence",
+            "description": "Get the ML models' confidence scores for Issue Type and Priority predictions on this ticket.",
+            "parameters": {
+                "type": "object",
+                "properties": {"subject": {"type": "string"}, "body": {"type": "string"}},
+                "required": ["subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_urgency_signals",
+            "description": "Scan the ticket text for urgency-indicating keywords and return a score.",
+            "parameters": {
+                "type": "object",
+                "properties": {"subject": {"type": "string"}, "body": {"type": "string"}},
+                "required": ["subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_ticket_entities",
+            "description": "Extract reference numbers, emails, and dates mentioned in the ticket text.",
+            "parameters": {
+                "type": "object",
+                "properties": {"subject": {"type": "string"}, "body": {"type": "string"}},
+                "required": ["subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "decide_escalation",
+            "description": "Decide whether this ticket should be escalated. Call AFTER you have urgency and confidence results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "priority": {"type": "string"},
+                    "urgency_score": {"type": "integer"},
+                    "ml_confidence": {"type": "number"},
+                },
+                "required": ["priority", "urgency_score", "ml_confidence"],
+            },
+        },
+    },
+]
+
+# ---------------------------------------------------------------------------
+# 5. JSON VALIDATION
+# ---------------------------------------------------------------------------
+
+
+def parse_llama_json(raw_output):
+    if not isinstance(raw_output, str):
+        raise TypeError("Llama output must be a string.")
+
+    cleaned = raw_output.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    if first_brace == -1 or last_brace == -1:
+        raise ValueError("No JSON object found in output.")
+
+    parsed = json.loads(cleaned[first_brace : last_brace + 1])
+
+    missing_fields = [f for f in REQUIRED_GENAI_FIELDS if f not in parsed]
+    if missing_fields:
+        raise ValueError(f"Missing fields: {missing_fields}")
+
+    parsed_queue = str(parsed["predicted_queue"]).strip()
+    if parsed_queue not in ALLOWED_QUEUES:
+        raise ValueError(f"Invalid queue returned: {parsed_queue}")
+
+    result = {field: str(parsed[field]).strip() for field in REQUIRED_GENAI_FIELDS}
+    result["escalate"] = bool(parsed.get("escalate", False))
+    return result
+
+
+def build_correction_prompt(bad_output, error_message):
+    return (
+        f"Your previous response was invalid.\n\n"
+        f"Previous response:\n{bad_output}\n\n"
+        f"Validation error:\n{error_message}\n\n"
+        f"Fix the issue and return ONLY a valid JSON object with the exact "
+        f"required structure. No markdown, no extra text."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. AGENT ORCHESTRATOR (Groq chat.completions, OpenAI-compatible tool calling)
+# ---------------------------------------------------------------------------
+
+
+def build_agent_system_prompt(predicted_type, predicted_priority):
+    allowed_queues_text = "\n".join(f"- {q}" for q in ALLOWED_QUEUES)
+    return f"""
+You are an autonomous AI agent for a customer support ticket triage system.
+
+You have access to tools that inspect the ticket and our ML models. Use them
+whenever they would help you decide better, especially before recommending
+escalation. You may call multiple tools, one at a time, before answering.
+
+ML PREDICTIONS (already computed, do not change them):
+Issue Type: {predicted_type}
+Priority: {predicted_priority}
+
+ALLOWED QUEUES (choose exactly one):
+{allowed_queues_text}
+
+When you are done gathering information, respond with ONLY this JSON object
+and nothing else (no markdown, no explanation):
+
+{{
+  "predicted_queue": "one exact Queue name from the allowed list",
+  "summary": "a concise 1-2 sentence summary",
+  "main_problem": "the main customer problem",
+  "recommended_action": "the recommended next action for the selected support team",
+  "suggested_response": "a short professional response to the customer",
+  "escalate": true or false
+}}
+""".strip()
+
+
+def call_groq_chat(messages, tools=None):
+    kwargs = dict(
+        model=LLAMA_MODEL,
+        messages=messages,
+        temperature=TEMPERATURE,
+    )
+    if tools:
+        kwargs["tools"] = tools
+
+    response = client.chat.completions.create(**kwargs)
+    return response.choices[0].message
+
+
+def run_agentic_pipeline(subject, body, log_callback=None):
+    ml_result = predict_ticket_labels(subject, body)
+
+    system_prompt = build_agent_system_prompt(
+        predicted_type=ml_result["predicted_type"],
+        predicted_priority=ml_result["predicted_priority"],
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Subject: {subject}\n\nBody: {body}"},
     ]
 
-# SIDEBAR: USER ACCESS CONTROL
-# Simulated login system to separate the Customer Portal from the Internal Support Dashboard
-st.sidebar.title("🔐 Access Control")
-user_role = st.sidebar.selectbox("Select User Role:", ["Customer", "Support Employee"])
+    final_raw_output = None
 
-# 👤 2. CUSTOMER PORTAL
-# This section simulates the frontend environment visible ONLY to the client
-if user_role == "Customer":
-    st.subheader("📥 Submit a Complaint")
-    customer_name = st.text_input("Your Name", placeholder="e.g., Khaled Mohamed")
-    complaint_text = st.text_area("Describe your issue here...", height=150, placeholder="Write your complaint...")
-    
-    # Handle ticket submission
-    if st.button("Submit Ticket", use_container_width=True):
-        if customer_name and complaint_text:
-            # Generate a new unique Ticket ID and append it to the session state array
-            new_id = f"T-{101 + len(st.session_state.tickets)}"
-            new_ticket = {
-                "Ticket ID": new_id,
-                "Customer": customer_name,
-                "Complaint": complaint_text,
-                "Status": "New"
-            }
-            st.session_state.tickets.append(new_ticket) 
-            st.success(f"Thank you {customer_name}! Your ticket ({new_id}) has been submitted successfully to our AI Triage system. Switch to 'Support Employee' role to view it!")
-        else:
-            st.warning("Please fill in both your name and complaint details.")
+    for step in range(1, MAX_AGENT_STEPS + 1):
+        assistant_message = call_groq_chat(messages, tools=TOOL_SCHEMAS)
+        tool_calls = assistant_message.tool_calls
 
-# 💼 3. SUPPORT EMPLOYEE DASHBOARD
-# This section simulates the backend enterprise environment with internal AI analytics
-elif user_role == "Support Employee":
-    st.subheader("💼 Internal Support Dashboard & AI Triage")
-    
-    # Check if the queue is empty (All tickets resolved)
-    if len(st.session_state.tickets) == 0:
-        st.balloons()
-        st.success("🎉 All tickets have been resolved! Great job team!")
+        if tool_calls:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in tool_calls
+                    ],
+                }
+            )
+
+            for tc in tool_calls:
+                tool_name = tc.function.name
+                try:
+                    tool_args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    tool_args = {}
+
+                if log_callback:
+                    log_callback(f"Step {step}: calling tool `{tool_name}` with {tool_args}")
+
+                if tool_name not in TOOL_REGISTRY:
+                    tool_result = {"error": f"Unknown tool: {tool_name}"}
+                else:
+                    try:
+                        tool_result = TOOL_REGISTRY[tool_name](**tool_args)
+                    except Exception as e:
+                        tool_result = {"error": str(e)}
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(tool_result, ensure_ascii=False),
+                    }
+                )
+            continue
+
+        final_raw_output = assistant_message.content or ""
+        break
     else:
-        # Step A: Display Active Tickets Queue
-        st.write("### 📋 Incoming Tickets Queue")
-        df = pd.DataFrame(st.session_state.tickets)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        st.write("---")
-        
-        # Step B: Select Ticket for Analysis
-        st.write("### 🔍 Select a Ticket to Review AI Triage")
-        selected_id = st.selectbox("Choose Ticket ID to process:", df["Ticket ID"])
-        
-        # Fetch details of the selected ticket from the dataframe
-        selected_ticket = df[df["Ticket ID"] == selected_id].iloc[0]
-        st.text_area("Original Customer Complaint:", value=selected_ticket["Complaint"], disabled=True, height=70)
-        
-        st.write("#### 🧠 AI Automated Analysis Results")
-        
-        # Step C: Dynamic AI Simulation Pipeline (MOCKING AI OUTPUTS)
-        # Evaluates the text keywords to simulate how real ML and LLM models will respond later
-        complaint_lower = selected_ticket["Complaint"].lower()
-        
-        if "credit" in complaint_lower or "charge" in complaint_lower or "money" in complaint_lower:
-            # Simulated outputs for Financial issues
-            ml_cat, ml_urg = "💳 Billing & Payments", "🔴 High"
-            gen_sum = "Customer is reporting a financial or transaction error."
-            gen_draft = f"Dear {selected_ticket['Customer']}, we are reviewing your billing transaction now."
-            agent_dept, agent_act = "🏦 Finance Department", "Verify payment gateway logs."
-            
-        elif "crash" in complaint_lower or "app" in complaint_lower or "error" in complaint_lower:
-            # Simulated outputs for Software/Technical bugs
-            ml_cat, ml_urg = "📱 Technical / Bug", "🟡 Medium"
-            gen_sum = "Customer is experiencing a technical glitch or application crash."
-            gen_draft = f"Dear {selected_ticket['Customer']}, our technical support is investigating the application error."
-            agent_dept, agent_act = "💻 IT & Development Team", "Check system bug logs."
-            
-        else:
-            # Simulated fallback outputs for general inquiries
-            ml_cat, ml_urg = "📂 General Inquiry", "🟢 Low"
-            gen_sum = "General customer support request."
-            gen_draft = f"Dear {selected_ticket['Customer']}, thank you for contacting us. We will reply shortly."
-            agent_dept, agent_act = "👥 Customer Service Team", "Assign to general support agent."
+        raise RuntimeError(f"Agent exceeded {MAX_AGENT_STEPS} steps without a final answer.")
 
-        # Step D: Render the AI Framework layout using Streamlit columns
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("##### 📊 ML Classification")
-            st.info(f"**Category:** {ml_cat}\n\n**Urgency:** {ml_urg}")
-        with col2:
-            st.markdown("##### 📝 Generative AI")
-            st.info(f"**Summary:** {gen_sum}\n\n**Draft:** {gen_draft}")
-        with col3:
-            st.markdown("##### 🤖 AI Agent Route")
-            st.info(f"**Target:** {agent_dept}\n\n**Action:** {agent_act}")
+    try:
+        genai_result = parse_llama_json(final_raw_output)
+    except (ValueError, TypeError, json.JSONDecodeError) as e:
+        if log_callback:
+            log_callback(f"Final answer failed validation ({e}), asking agent to fix it...")
+        messages.append({"role": "user", "content": build_correction_prompt(final_raw_output, str(e))})
+        fixed_message = call_groq_chat(messages)
+        genai_result = parse_llama_json(fixed_message.content or "")
 
-        st.write("---")
-        st.write("### 🛠️ Resolution Action")
-        
-        # Step E: Handle Workflow Action Buttons
-        action_col1, action_col2 = st.columns(2)
-        
-        # Action 1: Route Ticket
-        with action_col1:
-            if st.button("🚀 Approve AI Triage & Route Ticket", use_container_width=True):
-                # Remove the processed ticket from the state array and refresh the view
-                st.session_state.tickets = [t for t in st.session_state.tickets if t["Ticket ID"] != selected_id]
-                st.success(f"Ticket {selected_id} successfully routed to {agent_dept}!")
-                st.rerun() 
-                
-        # Action 2: Instantly Close and Resolve Ticket
-        with action_col2:
-            if st.button("✅ Resolve & Close Ticket Immediately", use_container_width=True):
-                # Remove the processed ticket from the state array and refresh the view with celebratory balloons
-                st.session_state.tickets = [t for t in st.session_state.tickets if t["Ticket ID"] != selected_id]
-                st.success(f"Excellent! Ticket {selected_id} is now CLOSED and resolved.")
-                st.rerun()
+    return {
+        "subject": subject,
+        "body": body,
+        "predicted_type": ml_result["predicted_type"],
+        "predicted_priority": ml_result["predicted_priority"],
+        **genai_result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 7. STREAMLIT UI
+# ---------------------------------------------------------------------------
+
+st.set_page_config(page_title="AI Support Ticket Triage", page_icon="🎫", layout="centered")
+
+st.title("🎫 AI Support Ticket Triage")
+st.caption("ML classification + an agentic GenAI layer (tool calling) running on Groq's cloud Llama.")
+
+with st.form("ticket_form"):
+    subject = st.text_input("Subject", placeholder="e.g. Incorrect invoice amount")
+    body = st.text_area(
+        "Body",
+        placeholder="e.g. Urgent — the amount shown on my latest invoice is wrong. Please review the charges.",
+        height=120,
+    )
+    submitted = st.form_submit_button("Process Ticket")
+
+if submitted:
+    if not subject.strip() and not body.strip():
+        st.warning("Please enter a subject or body.")
+    else:
+        log_box = st.empty()
+        logs = []
+
+        def log_callback(msg):
+            logs.append(msg)
+            log_box.info("\n\n".join(logs))
+
+        with st.spinner("Running ML models + agentic reasoning..."):
+            try:
+                result = run_agentic_pipeline(subject, body, log_callback=log_callback)
+            except Exception as e:
+                st.error(f"Pipeline failed: {e}")
+                st.stop()
+
+        st.success("Done.")
+
+        col1, col2 = st.columns(2)
+        col1.metric("Issue Type", result["predicted_type"])
+        col2.metric("Priority", result["predicted_priority"])
+
+        st.subheader("Queue")
+        st.write(result["predicted_queue"])
+
+        if result.get("escalate"):
+            st.error("⚠️ Recommended for escalation")
+
+        st.subheader("Summary")
+        st.write(result["summary"])
+
+        st.subheader("Main Problem")
+        st.write(result["main_problem"])
+
+        st.subheader("Recommended Action")
+        st.write(result["recommended_action"])
+
+        st.subheader("Suggested Customer Response")
+        st.write(result["suggested_response"])
+
+        with st.expander("Full JSON result"):
+            st.json(result)
