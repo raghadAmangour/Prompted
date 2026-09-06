@@ -145,6 +145,47 @@ def analyze_urgency_signals(subject: str, body: str) -> dict:
     return {"urgency_score": len(matched), "matched_keywords": matched}
 
 
+# Priority levels, ordered low -> high. Used to make sure a rule-based
+# override can only ever RAISE priority, never lower what the ML model said.
+PRIORITY_ORDER = ["low", "medium", "high"]
+
+
+def apply_priority_override(ml_priority: str, urgency_result: dict) -> dict:
+    """
+    Deterministic safety net on top of the ML priority model.
+
+    The ML model is trained on historical tickets and can miss ones that
+    contain explicit urgency language it didn't see much of in training
+    (e.g. "urgent", "critical", "can't access"). Rather than trust the model
+    alone, we always scan for known urgency keywords and guarantee a minimum
+    priority floor when they're present - this can only push priority UP,
+    never down, so it never overrides the model in the other direction.
+    """
+
+    def rank(priority_label):
+        label = str(priority_label).strip().lower()
+        return PRIORITY_ORDER.index(label) if label in PRIORITY_ORDER else 0
+
+    score = urgency_result.get("urgency_score", 0)
+    if score >= 2:
+        floor_rank = 2  # multiple urgency signals -> at least "high"
+    elif score >= 1:
+        floor_rank = 1  # one urgency signal -> at least "medium"
+    else:
+        floor_rank = 0
+
+    ml_rank = rank(ml_priority)
+    final_rank = max(ml_rank, floor_rank)
+    final_priority = PRIORITY_ORDER[final_rank]
+    overridden = final_rank > ml_rank
+
+    return {
+        "priority": final_priority,
+        "overridden": overridden,
+        "matched_keywords": urgency_result.get("matched_keywords", []),
+    }
+
+
 def extract_ticket_entities(subject: str, body: str) -> dict:
     text = f"{subject} {body}"
     reference_numbers = re.findall(r"\b(?:INV|ORD|REF)?-?\d{4,}\b", text)
@@ -275,8 +316,18 @@ def build_correction_prompt(bad_output, error_message):
 # ---------------------------------------------------------------------------
 
 
-def build_agent_system_prompt(predicted_type, predicted_priority):
+def build_agent_system_prompt(predicted_type, predicted_priority, priority_override=None):
     allowed_queues_text = "\n".join(f"- {q}" for q in ALLOWED_QUEUES)
+
+    priority_note = ""
+    if priority_override and priority_override["overridden"]:
+        keywords = ", ".join(priority_override["matched_keywords"])
+        priority_note = (
+            f"\nNOTE: Priority was automatically raised to '{predicted_priority}' "
+            f"because the ticket contains urgency language ({keywords}). "
+            f"Factor this into your recommended action and escalation decision.\n"
+        )
+
     return f"""
 You are an autonomous AI agent for a customer support ticket triage system.
 
@@ -287,7 +338,7 @@ escalation. You may call multiple tools, one at a time, before answering.
 ML PREDICTIONS (already computed, do not change them):
 Issue Type: {predicted_type}
 Priority: {predicted_priority}
-
+{priority_note}
 ALLOWED QUEUES (choose exactly one):
 {allowed_queues_text}
 
@@ -321,9 +372,22 @@ def call_groq_chat(messages, tools=None):
 def run_agentic_pipeline(subject, body, log_callback=None):
     ml_result = predict_ticket_labels(subject, body)
 
+    # Deterministic priority safety net: always runs, regardless of whether
+    # the agent decides to call the urgency tool itself.
+    urgency_result = analyze_urgency_signals(subject, body)
+    priority_override = apply_priority_override(ml_result["predicted_priority"], urgency_result)
+    ml_result["predicted_priority"] = priority_override["priority"]
+
+    if log_callback and priority_override["overridden"]:
+        log_callback(
+            f"Priority auto-raised to '{priority_override['priority']}' "
+            f"(matched: {priority_override['matched_keywords']})"
+        )
+
     system_prompt = build_agent_system_prompt(
         predicted_type=ml_result["predicted_type"],
         predicted_priority=ml_result["predicted_priority"],
+        priority_override=priority_override,
     )
 
     messages = [
@@ -402,6 +466,8 @@ def run_agentic_pipeline(subject, body, log_callback=None):
         "body": body,
         "predicted_type": ml_result["predicted_type"],
         "predicted_priority": ml_result["predicted_priority"],
+        "priority_overridden": priority_override["overridden"],
+        "priority_override_keywords": priority_override["matched_keywords"],
         **genai_result,
     }
 
@@ -514,6 +580,7 @@ st.markdown(
         padding: .2rem .55rem; border-radius: 20px; letter-spacing: .02em;
     }
     .badge-escalate { background: rgba(214,65,75,.12); color: var(--high); border: 1px solid rgba(214,65,75,.35); }
+    .priority-note { font-size: .78rem; color: var(--medium); margin-top: .5rem; }
     .ticket-meta { display: flex; gap: 1.6rem; margin-top: .7rem; font-size: .86rem; color: var(--text); }
     .meta-label { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .72rem;
                    display: block; margin-bottom: .1rem; }
@@ -668,6 +735,14 @@ if submitted:
         def esc(x):
             return html.escape(str(x))
 
+        priority_note_html = ""
+        if result.get("priority_overridden"):
+            keywords = ", ".join(result.get("priority_override_keywords", []))
+            priority_note_html = (
+                f'<div class="priority-note">Priority raised automatically — '
+                f"urgency language detected: {esc(keywords)}</div>"
+            )
+
         st.markdown(
             textwrap.dedent(
                 f"""
@@ -676,7 +751,7 @@ if submitted:
                     <span class="ticket-id">{ticket_id}</span>
                     <span class="badge" style="background:{priority_color}22;color:{priority_color};
                           border:1px solid {priority_color}55;">{esc(result['predicted_priority']).upper()} PRIORITY</span>{escalate_badge}
-                </div>
+                </div>{priority_note_html}
                 <div class="ticket-meta">
                     <span><span class="meta-label">Type</span>{esc(result['predicted_type'])}</span>
                     <span><span class="meta-label">Queue</span>{esc(result['predicted_queue'])}</span>
