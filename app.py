@@ -12,6 +12,7 @@ Deploy notes:
 import html
 import json
 import re
+import textwrap
 
 import joblib
 import pandas as pd
@@ -423,7 +424,8 @@ DEBUG_MODE = st.query_params.get("debug") == "1"
 # instead of a generic SaaS card kit. Priority is the one place color
 # carries meaning — every other surface stays quiet.
 st.markdown(
-    """
+    textwrap.dedent(
+        """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
@@ -534,7 +536,8 @@ st.markdown(
     .sidebar-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .sidebar-ticket-id { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .74rem; }
     </style>
-    """,
+    """
+    ),
     unsafe_allow_html=True,
 )
 
@@ -563,33 +566,39 @@ with st.sidebar:
         for t in reversed(st.session_state.ticket_history[-8:]):
             color = PRIORITY_COLOR_HEX.get(t["priority"].lower(), "#8FA0B8")
             st.markdown(
-                f"""<div class="sidebar-ticket">
+                textwrap.dedent(
+                    f"""<div class="sidebar-ticket">
                         <span class="sidebar-dot" style="background:{color}"></span>
                         <span class="sidebar-ticket-id">{html.escape(t['id'])}</span>
                         <span>{html.escape(t['subject'][:28])}</span>
-                    </div>""",
+                    </div>"""
+                ),
                 unsafe_allow_html=True,
             )
 
 # --- Masthead ------------------------------------------------------------
 st.markdown(
-    """
+    textwrap.dedent(
+        """
     <div class="console-mast">
         <span class="console-dot"></span>
         <span class="console-title">Ticket Triage Console</span>
     </div>
     <div class="console-sub">ML classification + an agentic GenAI layer, running on Groq's cloud Llama.</div>
-    """,
+    """
+    ),
     unsafe_allow_html=True,
 )
 st.markdown(
-    f"""
+    textwrap.dedent(
+        f"""
     <div class="console-status">
         <span>ML models &nbsp;<b>ready</b></span>
         <span>Reasoning engine &nbsp;<b>{html.escape(LLAMA_MODEL)}</b></span>
         <span>Tickets this session &nbsp;<b>{len(st.session_state.ticket_history)}</b></span>
     </div>
-    """,
+    """
+    ),
     unsafe_allow_html=True,
 )
 
@@ -640,7 +649,8 @@ if submitted:
             return html.escape(str(x))
 
         st.markdown(
-            f"""
+            textwrap.dedent(
+                f"""
             <div class="ticket-card" style="border-left-color:{priority_color}">
                 <div class="ticket-card-header">
                     <span class="ticket-id">{ticket_id}</span>
@@ -666,7 +676,8 @@ if submitted:
                     <div class="field-value">{esc(result['recommended_action'])}</div>
                 </div>
             </div>
-            """,
+            """
+            ),
             unsafe_allow_html=True,
         )
 
