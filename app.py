@@ -656,8 +656,7 @@ if submitted:
                 <div class="ticket-card-header">
                     <span class="ticket-id">{ticket_id}</span>
                     <span class="badge" style="background:{priority_color}22;color:{priority_color};
-                          border:1px solid {priority_color}55;">{esc(result['predicted_priority']).upper()} PRIORITY</span>
-                    {escalate_badge}
+                          border:1px solid {priority_color}55;">{esc(result['predicted_priority']).upper()} PRIORITY</span>{escalate_badge}
                 </div>
                 <div class="ticket-meta">
                     <span><span class="meta-label">Type</span>{esc(result['predicted_type'])}</span>
