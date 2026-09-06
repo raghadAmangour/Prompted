@@ -9,8 +9,10 @@ Deploy notes:
     GROQ_API_KEY = "gsk_..."
 """
 
+import html
 import json
 import re
+import textwrap
 
 import joblib
 import pandas as pd
@@ -408,19 +410,147 @@ def run_agentic_pipeline(subject, body, log_callback=None):
 # 7. STREAMLIT UI
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="AI Support Ticket Triage", page_icon="🎫", layout="centered")
+st.set_page_config(page_title="Ticket Triage Console", page_icon="🎫", layout="centered")
 
 # Developer/debug mode: OFF by default for every normal visit.
 # To inspect the raw JSON while testing, open the app with ?debug=1 added
 # to the URL, e.g. http://localhost:8501/?debug=1
 DEBUG_MODE = st.query_params.get("debug") == "1"
 
+# --- Design tokens (light "ops console" theme) --------------------------
+# Priority is the one place color carries meaning; everything else stays quiet.
+# NOTE: this custom CSS intentionally overrides Streamlit Cloud's theme
+# settings (Settings -> Theming) so the app looks the same everywhere it's
+# opened. If you ever want Streamlit Cloud's theme toggle back in control,
+# delete this st.markdown(...) block and the light-fixed styling below it.
+st.markdown(
+    textwrap.dedent(
+        """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+    :root {
+        --bg: #F6F7F9;
+        --panel: #FFFFFF;
+        --panel-2: #F0F2F5;
+        --border: #DCE1E8;
+        --text: #1B2430;
+        --muted: #64748B;
+        --accent: #0E9E90;
+        --accent-text: #FFFFFF;
+        --high: #D6414B;
+        --medium: #B9720E;
+        --low: #0E9E90;
+    }
+
+    html, body, [data-testid="stAppViewContainer"], .main {
+        background-color: var(--bg) !important;
+        color: var(--text) !important;
+        font-family: 'IBM Plex Sans', sans-serif;
+    }
+    [data-testid="stHeader"] { background: transparent; }
+    #MainMenu, footer { visibility: hidden; }
+
+    .block-container { max-width: 760px; padding-top: 2.5rem; }
+
+    /* Header / masthead */
+    .console-mast { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .15rem; }
+    .console-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+                   display: inline-block; box-shadow: 0 0 6px var(--accent); }
+    .console-title { font-family: 'IBM Plex Mono', monospace; font-size: 1.15rem;
+                      font-weight: 600; letter-spacing: .01em; color: var(--text); }
+    .console-sub { color: var(--muted); font-size: .88rem; margin-bottom: 1.6rem; }
+    .console-status { display: flex; gap: 1.4rem; flex-wrap: wrap; margin-bottom: 1.8rem;
+                        font-family: 'IBM Plex Mono', monospace; font-size: .74rem; color: var(--muted); }
+    .console-status b { color: var(--text); font-weight: 500; }
+
+    /* Form panel */
+    [data-testid="stForm"] {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1.4rem 1.4rem .9rem 1.4rem;
+    }
+    [data-testid="stWidgetLabel"] p {
+        font-family: 'IBM Plex Mono', monospace;
+        color: var(--muted);
+        font-size: .78rem;
+    }
+    [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
+        background: var(--panel-2) !important;
+        border: 1px solid var(--border) !important;
+        color: var(--text) !important;
+        border-radius: 6px !important;
+        font-family: 'IBM Plex Sans', sans-serif;
+    }
+    [data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 1px var(--accent) !important;
+    }
+    [data-testid="stFormSubmitButton"] button {
+        background: var(--accent);
+        color: var(--accent-text);
+        border: none;
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 600;
+        border-radius: 6px;
+        padding: .5rem 1.2rem;
+    }
+    [data-testid="stFormSubmitButton"] button:hover { background: #0c8478; color: var(--accent-text); }
+
+    /* Ticket result card */
+    .ticket-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--muted);
+        border-radius: 8px;
+        padding: 1.2rem 1.4rem;
+        margin-top: 1.6rem;
+    }
+    .ticket-card-header { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .ticket-id { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .82rem; }
+    .badge {
+        font-family: 'IBM Plex Mono', monospace; font-size: .68rem; font-weight: 600;
+        padding: .2rem .55rem; border-radius: 20px; letter-spacing: .02em;
+    }
+    .badge-escalate { background: rgba(214,65,75,.12); color: var(--high); border: 1px solid rgba(214,65,75,.35); }
+    .ticket-meta { display: flex; gap: 1.6rem; margin-top: .7rem; font-size: .86rem; color: var(--text); }
+    .meta-label { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .72rem;
+                   display: block; margin-bottom: .1rem; }
+    .ticket-divider { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
+    .ticket-field { margin-bottom: .9rem; }
+    .ticket-field:last-child { margin-bottom: 0; }
+    .field-label { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .72rem;
+                    margin-bottom: .2rem; }
+    .field-value { font-size: .92rem; line-height: 1.5; color: var(--text); }
+
+    .response-caption { font-family: 'IBM Plex Mono', monospace; color: var(--muted);
+                          font-size: .78rem; margin: 1.1rem 0 .4rem 0; }
+    [data-testid="stCodeBlock"] pre { background: var(--panel-2) !important; border: 1px solid var(--border) !important; }
+    [data-testid="stCodeBlock"] pre, [data-testid="stCodeBlock"] code, [data-testid="stCodeBlock"] span { color: var(--text) !important; }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] { background: var(--panel); border-right: 1px solid var(--border); }
+    [data-testid="stSidebar"] * { color: var(--text); }
+    .sidebar-ticket { display: flex; align-items: center; gap: .5rem; padding: .35rem 0;
+                        font-size: .82rem; border-bottom: 1px solid var(--border); }
+    .sidebar-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .sidebar-ticket-id { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: .74rem; }
+    </style>
+    """
+    ),
+    unsafe_allow_html=True,
+)
+
+PRIORITY_COLOR = {"high": "var(--high)", "medium": "var(--medium)", "low": "var(--low)"}
+PRIORITY_COLOR_HEX = {"high": "#D6414B", "medium": "#B9720E", "low": "#0E9E90"}
+
 if "ticket_counter" not in st.session_state:
     st.session_state.ticket_counter = 8214
 if "ticket_history" not in st.session_state:
     st.session_state.ticket_history = []
 
-# --- Sidebar: how it works + session history (plain Streamlit widgets) ---
+# --- Sidebar: how it works + session history ---------------------------
 with st.sidebar:
     st.markdown("**How this engine works**")
     st.caption(
@@ -435,11 +565,45 @@ with st.sidebar:
         st.caption("Nothing processed yet this session.")
     else:
         for t in reversed(st.session_state.ticket_history[-8:]):
-            st.caption(f"{t['id']} — {t['subject'][:30]} ({t['priority']})")
+            color = PRIORITY_COLOR_HEX.get(t["priority"].lower(), "#64748B")
+            st.markdown(
+                textwrap.dedent(
+                    f"""<div class="sidebar-ticket">
+                        <span class="sidebar-dot" style="background:{color}"></span>
+                        <span class="sidebar-ticket-id">{html.escape(t['id'])}</span>
+                        <span>{html.escape(t['subject'][:28])}</span>
+                    </div>"""
+                ),
+                unsafe_allow_html=True,
+            )
 
-st.title("🎫 AI Support Ticket Triage")
-st.caption("ML classification + an agentic GenAI layer (tool calling) running on Groq's cloud Llama.")
+# --- Masthead ------------------------------------------------------------
+st.markdown(
+    textwrap.dedent(
+        """
+    <div class="console-mast">
+        <span class="console-dot"></span>
+        <span class="console-title">Ticket Triage Console</span>
+    </div>
+    <div class="console-sub">ML classification + an agentic GenAI layer, running on Groq's cloud Llama.</div>
+    """
+    ),
+    unsafe_allow_html=True,
+)
+st.markdown(
+    textwrap.dedent(
+        f"""
+    <div class="console-status">
+        <span>ML models &nbsp;<b>ready</b></span>
+        <span>Reasoning engine &nbsp;<b>{html.escape(LLAMA_MODEL)}</b></span>
+        <span>Tickets this session &nbsp;<b>{len(st.session_state.ticket_history)}</b></span>
+    </div>
+    """
+    ),
+    unsafe_allow_html=True,
+)
 
+# --- Compose form ----------------------------------------------------------
 with st.form("ticket_form"):
     subject = st.text_input("Subject", placeholder="e.g. Incorrect invoice amount")
     body = st.text_area(
@@ -447,22 +611,21 @@ with st.form("ticket_form"):
         placeholder="e.g. Urgent — the amount shown on my latest invoice is wrong. Please review the charges.",
         height=120,
     )
-    submitted = st.form_submit_button("Process Ticket")
+    submitted = st.form_submit_button("Analyze ticket")
 
 if submitted:
     if not subject.strip() and not body.strip():
-        st.warning("Please enter a subject or body.")
+        st.warning("Enter a subject or body first.")
     else:
         # Internal agent steps (tool calls, retries, etc.) are intentionally
-        # NOT shown to the customer. They're only useful for debugging, so we
-        # collect them silently here. If you ever need to inspect them, print
-        # `debug_logs` to your terminal/console.
+        # not shown here — they're only useful for debugging, so we collect
+        # them silently. Print `debug_logs` yourself if you need to inspect them.
         debug_logs = []
 
         def log_callback(msg):
             debug_logs.append(msg)
 
-        with st.spinner("Running ML models + agentic reasoning..."):
+        with st.spinner("Analyzing ticket..."):
             try:
                 result = run_agentic_pipeline(subject, body, log_callback=log_callback)
             except Exception as e:
@@ -475,28 +638,51 @@ if submitted:
             {"id": ticket_id, "subject": subject or "(no subject)", "priority": result["predicted_priority"]}
         )
 
-        st.success(f"Done. Ticket {ticket_id}")
+        priority_key = result["predicted_priority"].strip().lower()
+        priority_color = PRIORITY_COLOR.get(priority_key, "var(--muted)")
+        escalate_badge = (
+            '<span class="badge badge-escalate">Escalation recommended</span>'
+            if result.get("escalate")
+            else ""
+        )
 
-        col1, col2 = st.columns(2)
-        col1.metric("Issue Type", result["predicted_type"])
-        col2.metric("Priority", result["predicted_priority"])
+        def esc(x):
+            return html.escape(str(x))
 
-        st.subheader("Queue")
-        st.write(result["predicted_queue"])
+        st.markdown(
+            textwrap.dedent(
+                f"""
+            <div class="ticket-card" style="border-left-color:{priority_color}">
+                <div class="ticket-card-header">
+                    <span class="ticket-id">{ticket_id}</span>
+                    <span class="badge" style="background:{priority_color}22;color:{priority_color};
+                          border:1px solid {priority_color}55;">{esc(result['predicted_priority']).upper()} PRIORITY</span>
+                    {escalate_badge}
+                </div>
+                <div class="ticket-meta">
+                    <span><span class="meta-label">Type</span>{esc(result['predicted_type'])}</span>
+                    <span><span class="meta-label">Queue</span>{esc(result['predicted_queue'])}</span>
+                </div>
+                <hr class="ticket-divider"/>
+                <div class="ticket-field">
+                    <div class="field-label">Summary</div>
+                    <div class="field-value">{esc(result['summary'])}</div>
+                </div>
+                <div class="ticket-field">
+                    <div class="field-label">Main problem</div>
+                    <div class="field-value">{esc(result['main_problem'])}</div>
+                </div>
+                <div class="ticket-field">
+                    <div class="field-label">Recommended action</div>
+                    <div class="field-value">{esc(result['recommended_action'])}</div>
+                </div>
+            </div>
+            """
+            ),
+            unsafe_allow_html=True,
+        )
 
-        if result.get("escalate"):
-            st.error("⚠️ Recommended for escalation")
-
-        st.subheader("Summary")
-        st.write(result["summary"])
-
-        st.subheader("Main Problem")
-        st.write(result["main_problem"])
-
-        st.subheader("Recommended Action")
-        st.write(result["recommended_action"])
-
-        st.subheader("Suggested Customer Response")
+        st.markdown('<div class="response-caption">Suggested customer response</div>', unsafe_allow_html=True)
         st.code(result["suggested_response"], language=None)
 
         if DEBUG_MODE:
