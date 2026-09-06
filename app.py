@@ -14,7 +14,6 @@ Example:
 
 import json
 import re
-import textwrap
 
 import joblib
 import pandas as pd
@@ -62,7 +61,6 @@ PRIORITY_ORDER = ["low", "medium", "high"]
 # 2. CLIENT + MODELS
 # ---------------------------------------------------------------------------
 
-
 @st.cache_resource
 def get_groq_client():
     api_key = st.secrets.get("GROQ_API_KEY")
@@ -108,7 +106,6 @@ issue_type_model, priority_model = load_ml_models()
 # 3. ML PREDICTIONS
 # ---------------------------------------------------------------------------
 
-
 def clean_text(value):
     if pd.isna(value):
         return ""
@@ -151,7 +148,6 @@ def predict_ticket_labels(subject, body):
 # 4. ML CONFIDENCE
 # ---------------------------------------------------------------------------
 
-
 def get_ml_confidence(subject: str, body: str) -> dict:
     ticket_text = build_ticket_text(subject, body)
 
@@ -186,7 +182,6 @@ def get_ml_confidence(subject: str, body: str) -> dict:
 # ---------------------------------------------------------------------------
 # 5. URGENCY DETECTION
 # ---------------------------------------------------------------------------
-
 
 URGENCY_KEYWORDS = [
     "urgent",
@@ -242,7 +237,6 @@ def analyze_urgency_signals(subject: str, body: str) -> dict:
 # ---------------------------------------------------------------------------
 # 6. PRIORITY SAFETY OVERRIDE
 # ---------------------------------------------------------------------------
-
 
 def normalize_priority(priority):
     priority = str(priority).strip().lower()
@@ -313,7 +307,6 @@ def apply_priority_override(ml_priority: str, urgency_result: dict) -> dict:
 # 7. TICKET ENTITY EXTRACTION
 # ---------------------------------------------------------------------------
 
-
 def extract_ticket_entities(subject: str, body: str) -> dict:
     text = build_ticket_text(subject, body)
 
@@ -350,7 +343,6 @@ def extract_ticket_entities(subject: str, body: str) -> dict:
 # 8. ESCALATION DECISION
 # ---------------------------------------------------------------------------
 
-
 def decide_escalation(
     priority: str,
     urgency_score: int,
@@ -375,15 +367,18 @@ def decide_escalation(
     )
 
     if should_escalate:
+
         if urgency_score >= 2:
             reason = (
                 "High priority combined with multiple "
                 "urgency signals."
             )
+
         else:
             reason = (
                 "High priority combined with low ML confidence."
             )
+
     else:
         reason = (
             "No strong combined signal for escalation."
@@ -398,7 +393,6 @@ def decide_escalation(
 # ---------------------------------------------------------------------------
 # 9. AGENT TOOLS
 # ---------------------------------------------------------------------------
-
 
 TOOL_SCHEMAS = [
     {
@@ -499,7 +493,6 @@ TOOL_SCHEMAS = [
 # 10. SAFE TOOL EXECUTION
 # ---------------------------------------------------------------------------
 
-
 def execute_agent_tool(
     tool_name,
     original_subject,
@@ -528,6 +521,7 @@ def execute_agent_tool(
         )
 
     if tool_name == "decide_escalation":
+
         safe_confidence = (
             priority_confidence
             if priority_confidence is not None
@@ -549,12 +543,13 @@ def execute_agent_tool(
 # 11. JSON VALIDATION
 # ---------------------------------------------------------------------------
 
-
 def parse_boolean(value):
+
     if isinstance(value, bool):
         return value
 
     if isinstance(value, str):
+
         normalized = value.strip().lower()
 
         if normalized in {
@@ -577,6 +572,7 @@ def parse_boolean(value):
 
 
 def parse_llama_json(raw_output):
+
     if not isinstance(raw_output, str):
         raise TypeError(
             "Llama output must be a string."
@@ -644,6 +640,7 @@ def parse_llama_json(raw_output):
     result = {}
 
     for field in REQUIRED_GENAI_FIELDS:
+
         value = str(
             parsed[field]
         ).strip()
@@ -666,6 +663,7 @@ def build_correction_prompt(
     bad_output,
     error_message,
 ):
+
     allowed_queues_text = "\n".join(
         f"- {queue}"
         for queue in ALLOWED_QUEUES
@@ -712,7 +710,6 @@ Rules:
 # 12. AGENT SYSTEM PROMPT
 # ---------------------------------------------------------------------------
 
-
 def build_agent_system_prompt(
     predicted_type,
     ml_priority,
@@ -729,6 +726,7 @@ def build_agent_system_prompt(
         priority_override
         and priority_override["overridden"]
     ):
+
         keywords = ", ".join(
             priority_override[
                 "matched_keywords"
@@ -750,6 +748,7 @@ The final priority is authoritative.
 """.strip()
 
     else:
+
         priority_note = f"""
 ML priority:
 {ml_priority}
@@ -833,11 +832,11 @@ JSON only.
 # 13. GROQ CHAT
 # ---------------------------------------------------------------------------
 
-
 def call_groq_chat(
     messages,
     tools=None,
 ):
+
     kwargs = {
         "model": LLAMA_MODEL,
         "messages": messages,
@@ -857,7 +856,6 @@ def call_groq_chat(
 # ---------------------------------------------------------------------------
 # 14. AGENTIC PIPELINE
 # ---------------------------------------------------------------------------
-
 
 def run_agentic_pipeline(
     subject,
@@ -907,6 +905,7 @@ def run_agentic_pipeline(
         log_callback
         and priority_override["overridden"]
     ):
+
         log_callback(
             f"Priority raised from {ml_priority} "
             f"to {final_priority}"
@@ -1016,6 +1015,7 @@ def run_agentic_pipeline(
                     )
 
                 try:
+
                     tool_result = (
                         execute_agent_tool(
                             tool_name=tool_name,
@@ -1030,6 +1030,7 @@ def run_agentic_pipeline(
                     )
 
                 except Exception as e:
+
                     tool_result = {
                         "error": str(e)
                     }
@@ -1055,6 +1056,7 @@ def run_agentic_pipeline(
         break
 
     else:
+
         raise RuntimeError(
             "Agent exceeded the maximum number "
             "of reasoning/tool steps."
@@ -1077,6 +1079,7 @@ def run_agentic_pipeline(
     ) as e:
 
         if log_callback:
+
             log_callback(
                 "AI JSON validation failed. "
                 "Requesting correction."
@@ -1178,104 +1181,14 @@ def run_agentic_pipeline(
 # 15. DEBUG
 # ---------------------------------------------------------------------------
 
-
 DEBUG_MODE = (
     st.query_params.get("debug") == "1"
 )
 
 
 # ---------------------------------------------------------------------------
-# 16. DESIGN
+# 16. SESSION STATE
 # ---------------------------------------------------------------------------
-
-
-st.markdown(
-    """
-    <style>
-
-    :root {
-        --bg: #F6F7F9;
-        --panel: #FFFFFF;
-        --panel-2: #F0F2F5;
-        --border: #DCE1E8;
-        --text: #1B2430;
-        --muted: #64748B;
-        --accent: #0E9E90;
-    }
-
-    html,
-    body,
-    [data-testid="stAppViewContainer"] {
-        background-color: #F6F7F9 !important;
-        color: #1B2430 !important;
-    }
-
-    [data-testid="stHeader"] {
-        background: transparent !important;
-    }
-
-    #MainMenu,
-    footer {
-        visibility: hidden;
-    }
-
-    .block-container {
-        max-width: 760px;
-        padding-top: 2.5rem;
-    }
-
-    [data-testid="stForm"] {
-        background: #FFFFFF;
-        border: 1px solid #DCE1E8;
-        border-radius: 10px;
-        padding: 1.4rem 1.4rem .9rem 1.4rem;
-    }
-
-    [data-testid="stTextInput"] input,
-    [data-testid="stTextArea"] textarea {
-        background: #F0F2F5 !important;
-        border: 1px solid #DCE1E8 !important;
-        color: #1B2430 !important;
-        border-radius: 6px !important;
-    }
-
-    [data-testid="stTextInput"] input:focus,
-    [data-testid="stTextArea"] textarea:focus {
-        border-color: #0E9E90 !important;
-        box-shadow: 0 0 0 1px #0E9E90 !important;
-    }
-
-    [data-testid="stFormSubmitButton"] button {
-        background: #0E9E90 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 6px !important;
-        font-weight: 600 !important;
-    }
-
-    [data-testid="stFormSubmitButton"] button:hover {
-        background: #0c8478 !important;
-    }
-
-    [data-testid="stSidebar"] {
-        background: #FFFFFF !important;
-        border-right: 1px solid #DCE1E8;
-    }
-
-    [data-testid="stSidebar"] hr {
-        border-color: #DCE1E8;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ---------------------------------------------------------------------------
-# 17. SESSION STATE
-# ---------------------------------------------------------------------------
-
 
 if "ticket_counter" not in st.session_state:
     st.session_state.ticket_counter = 8214
@@ -1285,9 +1198,8 @@ if "ticket_history" not in st.session_state:
 
 
 # ---------------------------------------------------------------------------
-# 18. SIDEBAR
+# 17. SIDEBAR
 # ---------------------------------------------------------------------------
-
 
 with st.sidebar:
 
@@ -1307,13 +1219,57 @@ with st.sidebar:
 
     st.markdown("### Recent tickets")
 
-    if not st.session_state.ticket_history:
+    sidebar_history = st.empty()
 
-        st.caption(
-            "Nothing processed yet this session."
-        )
 
-    else:
+# ---------------------------------------------------------------------------
+# 18. HEADER
+# ---------------------------------------------------------------------------
+
+header_col1, header_col2 = st.columns(
+    [0.06, 0.94]
+)
+
+with header_col1:
+    st.markdown("🟢")
+
+with header_col2:
+    st.markdown("### Ticket Triage Console")
+
+st.caption(
+    "Automatically classify incoming tickets and draft a reply."
+)
+
+
+# ---------------------------------------------------------------------------
+# 19. STATUS
+# ---------------------------------------------------------------------------
+
+status_placeholder = st.empty()
+
+status_placeholder.markdown(
+    f"**Tickets processed this session:** "
+    f"{len(st.session_state.ticket_history)}"
+)
+
+
+# ---------------------------------------------------------------------------
+# 20. RENDER SIDEBAR HISTORY
+# ---------------------------------------------------------------------------
+
+def render_sidebar_history():
+
+    sidebar_history.empty()
+
+    with sidebar_history:
+
+        if not st.session_state.ticket_history:
+
+            st.caption(
+                "Nothing processed yet this session."
+            )
+
+            return
 
         for ticket in reversed(
             st.session_state.ticket_history[-8:]
@@ -1343,53 +1299,19 @@ with st.sidebar:
             )
 
 
-# ---------------------------------------------------------------------------
-# 19. HEADER
-# ---------------------------------------------------------------------------
-
-
-col1, col2 = st.columns(
-    [0.06, 0.94]
-)
-
-with col1:
-    st.markdown("🟢")
-
-with col2:
-    st.markdown(
-        "### Ticket Triage Console"
-    )
-
-st.caption(
-    "Automatically classify incoming tickets and draft a reply."
-)
-
-
-# ---------------------------------------------------------------------------
-# 20. STATUS
-# ---------------------------------------------------------------------------
-
-
-st.markdown(
-    f"""
-    **Tickets processed this session:** 
-    {len(st.session_state.ticket_history)}
-    """,
-)
+# Render initial sidebar state
+render_sidebar_history()
 
 
 # ---------------------------------------------------------------------------
 # 21. FORM
 # ---------------------------------------------------------------------------
 
-
 with st.form("ticket_form"):
 
     subject = st.text_input(
         "Subject",
-        placeholder=(
-            "e.g. Incorrect invoice amount"
-        ),
+        placeholder="e.g. Incorrect invoice amount",
     )
 
     body = st.text_area(
@@ -1410,7 +1332,6 @@ with st.form("ticket_form"):
 # ---------------------------------------------------------------------------
 # 22. PROCESS
 # ---------------------------------------------------------------------------
-
 
 if submitted:
 
@@ -1457,6 +1378,10 @@ if submitted:
             f"TCK-{st.session_state.ticket_counter}"
         )
 
+        # -----------------------------------------------------
+        # Save ticket to session history
+        # -----------------------------------------------------
+
         st.session_state.ticket_history.append(
             {
                 "id": ticket_id,
@@ -1471,6 +1396,23 @@ if submitted:
         )
 
         # -----------------------------------------------------
+        # IMPORTANT:
+        # Update counter immediately
+        # -----------------------------------------------------
+
+        status_placeholder.markdown(
+            f"**Tickets processed this session:** "
+            f"{len(st.session_state.ticket_history)}"
+        )
+
+        # -----------------------------------------------------
+        # IMPORTANT:
+        # Update sidebar immediately
+        # -----------------------------------------------------
+
+        render_sidebar_history()
+
+        # -----------------------------------------------------
         # Result values
         # -----------------------------------------------------
 
@@ -1482,10 +1424,10 @@ if submitted:
 
         priority_lower = priority.lower()
 
-        if priority_lower == "HIGH":
+        if priority_lower == "high":
             priority_icon = "🔴"
 
-        elif priority_lower == "MEDIUM":
+        elif priority_lower == "medium":
             priority_icon = "🟠"
 
         else:
@@ -1495,9 +1437,7 @@ if submitted:
         # Ticket result
         # -----------------------------------------------------
 
-        with st.container(
-            border=True
-        ):
+        with st.container(border=True):
 
             header_col1, header_col2 = st.columns(
                 [0.35, 0.65]
@@ -1516,9 +1456,8 @@ if submitted:
                     f"**{priority} PRIORITY**"
                 )
 
-                if result.get(
-                    "escalate"
-                ):
+                if result.get("escalate"):
+
                     badge_text += (
                         "  🚨 **Escalation recommended**"
                     )
@@ -1541,8 +1480,7 @@ if submitted:
                             "ml_priority",
                             "unknown",
                         )
-                    )
-                    .upper()
+                    ).upper()
                 )
 
                 final_priority = (
@@ -1550,8 +1488,7 @@ if submitted:
                         result[
                             "predicted_priority"
                         ]
-                    )
-                    .upper()
+                    ).upper()
                 )
 
                 keywords = ", ".join(
@@ -1708,6 +1645,7 @@ if submitted:
                 if debug_logs:
 
                     for log in debug_logs:
+
                         st.write(
                             f"• {log}"
                         )
