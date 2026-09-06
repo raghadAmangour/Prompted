@@ -550,32 +550,40 @@ if "ticket_counter" not in st.session_state:
 if "ticket_history" not in st.session_state:
     st.session_state.ticket_history = []
 
-# --- Sidebar: how it works + session history ---------------------------
+# --- Sidebar: quick guide + session history ---------------------------
 with st.sidebar:
-    st.markdown("**How this engine works**")
+    st.markdown("**Quick guide**")
     st.caption(
-        "1. Two ML models classify Issue Type and Priority.\n\n"
-        "2. A GenAI agent (Groq-hosted Llama) can call tools — urgency scan, "
-        "confidence check, entity extraction, escalation logic — before answering.\n\n"
-        "3. It returns the queue, summary, and a ready customer reply."
+        "Paste the customer's subject and message, then click **Analyze ticket**. "
+        "You'll get the issue type, priority, the right queue, a summary, "
+        "the recommended next action, and a ready-to-send reply."
     )
     st.divider()
     st.markdown("**Recent tickets**")
-    if not st.session_state.ticket_history:
-        st.caption("Nothing processed yet this session.")
-    else:
-        for t in reversed(st.session_state.ticket_history[-8:]):
-            color = PRIORITY_COLOR_HEX.get(t["priority"].lower(), "#64748B")
-            st.markdown(
-                textwrap.dedent(
-                    f"""<div class="sidebar-ticket">
+    history_placeholder = st.container()
+
+
+def render_history():
+    history_placeholder.empty()
+    with history_placeholder:
+        if not st.session_state.ticket_history:
+            st.caption("Nothing processed yet this session.")
+        else:
+            for t in reversed(st.session_state.ticket_history[-8:]):
+                color = PRIORITY_COLOR_HEX.get(t["priority"].lower(), "#64748B")
+                st.markdown(
+                    textwrap.dedent(
+                        f"""<div class="sidebar-ticket">
                         <span class="sidebar-dot" style="background:{color}"></span>
                         <span class="sidebar-ticket-id">{html.escape(t['id'])}</span>
                         <span>{html.escape(t['subject'][:28])}</span>
                     </div>"""
-                ),
-                unsafe_allow_html=True,
-            )
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+
+render_history()
 
 # --- Masthead ------------------------------------------------------------
 st.markdown(
@@ -585,23 +593,32 @@ st.markdown(
         <span class="console-dot"></span>
         <span class="console-title">Ticket Triage Console</span>
     </div>
-    <div class="console-sub">ML classification + an agentic GenAI layer, running on Groq's cloud Llama.</div>
+    <div class="console-sub">Automatically classify incoming tickets and draft a reply.</div>
     """
     ),
     unsafe_allow_html=True,
 )
-st.markdown(
-    textwrap.dedent(
-        f"""
+
+# Status line uses a placeholder so it can be refreshed with the correct
+# count right after a ticket is processed (see below), instead of showing
+# a stale number from before this run's ticket was added.
+status_placeholder = st.empty()
+
+
+def render_status():
+    status_placeholder.markdown(
+        textwrap.dedent(
+            f"""
     <div class="console-status">
-        <span>ML models &nbsp;<b>ready</b></span>
-        <span>Reasoning engine &nbsp;<b>{html.escape(LLAMA_MODEL)}</b></span>
-        <span>Tickets this session &nbsp;<b>{len(st.session_state.ticket_history)}</b></span>
+        <span>Tickets processed this session &nbsp;<b>{len(st.session_state.ticket_history)}</b></span>
     </div>
     """
-    ),
-    unsafe_allow_html=True,
-)
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+render_status()
 
 # --- Compose form ----------------------------------------------------------
 with st.form("ticket_form"):
@@ -637,6 +654,8 @@ if submitted:
         st.session_state.ticket_history.append(
             {"id": ticket_id, "subject": subject or "(no subject)", "priority": result["predicted_priority"]}
         )
+        render_status()  # refresh the counter now that this ticket is counted
+        render_history()  # refresh the sidebar list to include this ticket
 
         priority_key = result["predicted_priority"].strip().lower()
         priority_color = PRIORITY_COLOR.get(priority_key, "var(--muted)")
