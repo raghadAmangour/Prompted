@@ -1,4 +1,3 @@
-# Prompted
 # AI Support Ticket Triage System
 
 An end-to-end support ticket triage system that combines **machine learning classification** (Issue Type + Priority) with a **Generative AI / Agentic layer** (Groq-hosted LLM with tool calling) for automated queue routing, response drafting, and escalation decisions — wrapped in a Streamlit console for support agents.
@@ -30,12 +29,15 @@ Three additional deterministic safeguards were designed and evaluated for the ge
 ## Repository Structure
 
 ```
+├── app.py               # Streamlit "Ticket Triage Console" (ML + Agentic + UI)
+├── data/
+│   └── download_data.py # Fetches and prepares the dataset from Hugging Face
 ├── modeling/            # ML training script + result summaries
 ├── models/              # Trained .joblib models
-├── app/                 # Streamlit "Ticket Triage Console" UI
 ├── evaluation/          # Ground-truth construction, agent evaluation runner, safeguards
 ├── docs/                # Final report
-└── requirements.txt
+├── requirements.txt
+└── .gitignore
 ```
 
 ## How to Run
@@ -45,32 +47,39 @@ Three additional deterministic safeguards were designed and evaluated for the ge
 pip install -r requirements.txt
 ```
 
-### 2. Train the ML models
+### 2. Download and prepare the dataset
+```bash
+python data/download_data.py
+```
+This fetches the dataset from Hugging Face and prepares it for training. Make sure the output file matches the path expected by `modeling/final_ml_pipeline.py`.
+
+### 3. Train the ML models
 ```bash
 cd modeling
-python train_models.py
+python final_ml_pipeline.py
 ```
 This trains and tunes 5 candidate models (Logistic Regression, Linear SVM, Multinomial Naive Bayes, SGD, Complement Naive Bayes) against a `DummyClassifier` baseline via `RandomizedSearchCV` (15 iterations, 5-fold Stratified CV), and saves the winning models to `models/issue_type_model.joblib` and `models/priority_model.joblib`.
 
-### 3. Configure the Groq API key
-Create a `secrets.toml` file (or `.streamlit/secrets.toml`) — **never commit this file**:
+### 4. Configure the Groq API key
+Create a `secrets.toml` file (or `.streamlit/secrets.toml`) **in the project root** — **never commit this file**:
 ```toml
 GROQ_API_KEY = "gsk_..."
 ```
 
-### 4. Launch the app
+### 5. Launch the app
+Run this from the **project root** (not from inside any subfolder), since model and secrets paths are resolved relative to the working directory:
 ```bash
-cd app
-streamlit run streamlit_app.py
+streamlit run app.py
 ```
 Paste a ticket's subject and body, click **Analyze Ticket**, and review the classification, routing, and suggested response.
 
-### 5. (Optional) Reproduce the evaluation
+### 6. (Optional) Reproduce the evaluation
 ```bash
 cd evaluation
-python build_ground_truth.py        # builds a clean held-out ground-truth sample
+python build_ground_truth.py        # builds the clean held-out ground-truth sample
 python run_agent_evaluation.py      # runs the full agentic pipeline against it
 ```
+`safeguards.py` contains the three deterministic checks (hallucination grounding, unsafe-advice filter, human-approval gate) applied to the agent's outputs; see `routing_ground_truth_50_RESULTS_with_safeguards.csv` for the applied results.
 
 ## Summarized Results
 
