@@ -1,1 +1,14 @@
+secrets.toml
+.streamlit/secrets.toml
+
+*.joblib
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+.DS_Store
+Thumbs.db
+
 ml_ready_support_tickets.csv
