@@ -1,0 +1,32 @@
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+TASK: Issue Type Classification
+--------------------------------------------------------------------------------
+  Winner model      : Logistic Regression
+  Baseline model    : Baseline (Majority Class)
+  Accuracy          : 86.1%   (baseline: 39.8%)
+  Macro F1          : 0.8647   (baseline: 0.1422)
+  Per-class F1:
+    - change    : 0.9535
+    - incident  : 0.8374
+    - problem   : 0.6832
+    - request   : 0.9846
+
+TASK: Priority Classification
+--------------------------------------------------------------------------------
+  Winner model      : Logistic Regression
+  Baseline model    : Baseline (Majority Class)
+  Accuracy          : 65.4%   (baseline: 41.4%)
+  Macro F1          : 0.6412   (baseline: 0.1953)
+  Cost per ticket   : 5.48   (baseline: 10.09)
+  Per-class recall (the number that matters most for priority):
+    - high      : 68.9%
+    - medium    : 66.9%
+    - low       : 55.9%
+
+================================================================================
+NOTE: cost matrix charges HIGH->LOW the most (missed urgent ticket),
+while still allowing the model to use the 'low' class in practice.
+================================================================================
